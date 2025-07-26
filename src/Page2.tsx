@@ -21,7 +21,7 @@ export default function Page4(): JSX.Element {
       description: "透明记录捐款流向，按预设规则自动发放善款。",
     },
     {
-      icon: <BarChart3 className="w-8 h-8" />,
+      icon: <BarChart3 className="w-9 h-9" />,
       title: "企业股权信托",
       description:
         "创始团队或员工持股计划可通过链上信托管理，实现激励和退出机制。",
@@ -46,7 +46,7 @@ export default function Page4(): JSX.Element {
 
 
 
-      <div className="container mx-auto px-4">
+      <div className="container mx-auto px-5">
         <div className="flex flex-col items-center gap-16 relative z-10">
           {/* Section Title */}
           <p className="text-4xl  text-center tracking-tight font-semibold text-white">
