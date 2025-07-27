@@ -34,7 +34,7 @@ export default function Page2(): JSX.Element {
 
       <div className="flex flex-col items-center gap-6 relative z-10 max-w-[808px] mx-auto">
         {/* Section title */}
-        <h2 className="self-stretch [font-family:'PingFang_SC-Semibold',Helvetica] font-bold text-white text-4xl tracking-[-1.50px] leading-[normal]">
+        <h2 className="self-stretch [font-family:'PingFang_SC-Semibold',Helvetica] font-bold text-white text-4xl tracking-[-1.50px] leading-[normal] margin-0 auto">
           我们的优势
         </h2>
 
@@ -61,22 +61,22 @@ export default function Page2(): JSX.Element {
 // Advantage card component
 function AdvantageCard({ icon, title, description }: any) {
   return (
-    <Card className="flex-1 h-[280px] bg-[#080c1999] rounded-[20px] border-[none]">
-      <CardContent className="relative p-0 h-full">
+    <Card className="flex-1 h-[280px] bg-[#080c1999] rounded-[40px] border-[none]">
+      <CardContent className="relative p-1 h-full">
         {/* Gradient glow effect */}
         <div className="absolute w-36 h-36 top-0 left-0 rounded-[71.94px] blur-[127.75px] [background:radial-gradient(50%_50%_at_53%_44%,rgba(26,151,163,0.7)_0%,rgba(44,91,137,0.7)_100%)]" />
 
         <div className="flex flex-col items-start gap-[34px] p-14">
           {/* Title with icon */}
-          <div className="inline-flex items-center gap-3">
+          <div className="inline-flex items-center gap-2">
             <div className="relative w-9 h-9">{icon}</div>
-            <div className="[font-family:'PingFang_SC-Medium',Helvetica] font-medium text-white text-[18px] tracking-[1.50px] leading-[normal]">
+            <div className="[font-family:'PingFang_SC-Semibold',Helvetica] font-medium text-white text-2xl tracking-[0.2px] leading-[normal]">
               {title}
             </div>
           </div>
 
           {/* Description */}
-          <div className="[font-family:'PingFang_SC-Regular',Helvetica] font-normal text-white text-[20px] tracking-[-1.50px] leading-[34px]">
+          <div className="[font-family:'PingFang_SC-Regular',Helvetica] font-normal text-white text-[24px] tracking-[-1.50px] leading-[34px] display-flex">
             {description.map((line: any, index: any) => (
               <React.Fragment key={index}>
                 {line}

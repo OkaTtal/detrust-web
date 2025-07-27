@@ -40,12 +40,6 @@ export default function Page4(): JSX.Element {
   <div className="absolute w-[568px] h-[511px] top-[778px] left-0 rounded-[283.94px/255.69px] blur-[66.05px] bg-[linear-gradient(0deg,rgba(199,199,255,0.82)_0%,rgba(199,199,255,0.82)_100%)]" />
   <div className="absolute w-[343px] h-[428px] top-[88px] right-0 bg-[#20b2aa] rounded-[171.6px/213.82px] blur-[127.75px]" />
 </div>
-
-
-
-
-
-
       <div className="container mx-auto px-5">
         <div className="flex flex-col items-center gap-16 relative z-10">
           {/* Section Title */}
@@ -71,7 +65,7 @@ export default function Page4(): JSX.Element {
                       <div className="w-[42px] h-[42px] flex items-center justify-center bg-black/20 rounded-full">
                         {card.icon}
                       </div>
-                      <h3 className="text-2xl font-medium text-white tracking-tight ">
+                      <h3 className="text-2xl w-[420px] font-medium text-white tracking-tight ">
                         {card.title}
                       </h3>
                     </div>

@@ -19,6 +19,8 @@ import { Switch } from "@/components/ui/switch"
 export const queryClient = new QueryClient()
 
 const CONTRACT_ADDRESS = '0xE99938fc114b20f818C9202955ba8C8c4a5a79B9'
+const USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7' // 主网USDT地址
+const WBTC_ADDRESS = '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599' // 主网WBTC地址
 
 const CONTRACT_ABI = [
   {
@@ -137,6 +139,36 @@ const CONTRACT_ABI = [
   }
 ]
 
+const ERC20_ABI = [
+  {
+    "constant": true,
+    "inputs": [{"name": "_owner", "type": "address"}],
+    "name": "balanceOf",
+    "outputs": [{"name": "balance", "type": "uint256"}],
+    "type": "function"
+  },
+  {
+    "constant": false,
+    "inputs": [
+      {"name": "_to", "type": "address"},
+      {"name": "_value", "type": "uint256"}
+    ],
+    "name": "transfer",
+    "outputs": [{"name": "success", "type": "bool"}],
+    "type": "function"
+  },
+  {
+    "constant": false,
+    "inputs": [
+      {"name": "_spender", "type": "address"},
+      {"name": "_value", "type": "uint256"}
+    ],
+    "name": "approve",
+    "outputs": [{"name": "success", "type": "bool"}],
+    "type": "function"
+  }
+]
+
 interface TrustSetting {
   settlor: string
   tokenAddress: string
@@ -160,15 +192,16 @@ interface TrustData {
   label: string
   value: string
 }
+
 const formatDate = (timestamp: string) => {
   const date = new Date(Number(timestamp) * 1000)
-  return date.toLocaleString()
+  return date.toLocaleString('zh-CN')
 }
 
-// 格式化地址显示
 const formatAddress = (address: string) => {
   return `${address.slice(0, 6)}...${address.slice(-4)}`
 }
+
 const Frame: React.FC<{ 
   trustData: TrustData[], 
   trustId: string,
@@ -181,10 +214,12 @@ const Frame: React.FC<{
   const [depositAmount, setDepositAmount] = useState('')
   const [isDepositing, setIsDepositing] = useState(false)
   const [depositMessage, setDepositMessage] = useState('')
+  const [isWithdrawing, setIsWithdrawing] = useState(false)
+  const [withdrawMessage, setWithdrawMessage] = useState('')
+  const { data: walletClient } = useWalletClient()
 
-  // 处理注资操作
   const handleDeposit = async () => {
-    if (!contract || !address) {
+    if (!contract || !address || !walletClient) {
       setDepositMessage('⚠️ 请先连接钱包')
       return
     }
@@ -198,18 +233,75 @@ const Frame: React.FC<{
       setIsDepositing(true)
       setDepositMessage('处理中...')
       
-      const amountWei : BigNumber = ethers.utils.parseEther(depositAmount)
-      const tx = await contract.deposit(trustId, { value: amountWei })
-      await tx.wait()
+      const provider = new ethers.providers.Web3Provider(walletClient.transport, walletClient.chain.id)
+      const signer = provider.getSigner()
+
+      if (setting.tokenAddress === USDT_ADDRESS || setting.tokenAddress === WBTC_ADDRESS) {
+        const tokenContract = new ethers.Contract(setting.tokenAddress, ERC20_ABI, signer)
+        const decimals = setting.tokenAddress === USDT_ADDRESS ? 6 : 8
+        const amount = ethers.utils.parseUnits(depositAmount, decimals)
+        
+        // 批准合约使用代币
+        const approveTx = await tokenContract.approve(CONTRACT_ADDRESS, amount)
+        await approveTx.wait()
+        
+        // 调用存款函数
+        const tx = await contract.deposit(trustId)
+        await tx.wait()
+      } else {
+        // ETH存款
+        const amountWei = ethers.utils.parseEther(depositAmount)
+        const tx = await contract.deposit(trustId, { value: amountWei })
+        await tx.wait()
+      }
       
       setDepositMessage('✅ 注资成功')
-      refetch() // 刷新数据
+      refetch()
       setDepositAmount('')
     } catch (error: any) {
       console.error('注资失败:', error)
       setDepositMessage(`⚠️ 注资失败: ${error.message || '未知错误'}`)
     } finally {
       setIsDepositing(false)
+    }
+  }
+
+  const handleWithdraw = async () => {
+    if (!contract || !address || !walletClient) {
+      setWithdrawMessage('⚠️ 请先连接钱包')
+      return
+    }
+
+    if (status.isRevoked) {
+      setWithdrawMessage('⚠️ 信托已被撤销')
+      return
+    }
+
+    const currentTime = Math.floor(Date.now() / 1000)
+    if (Number(setting.releaseTime) > currentTime) {
+      setWithdrawMessage('⚠️ 未到释放时间')
+      return
+    }
+
+    if (Number(status.withdrawedCount) >= Number(setting.withdrawCount)) {
+      setWithdrawMessage('⚠️ 已达到最大提取次数')
+      return
+    }
+
+    try {
+      setIsWithdrawing(true)
+      setWithdrawMessage('处理中...')
+      
+      const tx = await contract.withdraw(trustId)
+      await tx.wait()
+      
+      setWithdrawMessage('✅ 提取成功')
+      refetch()
+    } catch (error: any) {
+      console.error('提取失败:', error)
+      setWithdrawMessage(`⚠️ 提取失败: ${error.message || '未知错误'}`)
+    } finally {
+      setIsWithdrawing(false)
     }
   }
 
@@ -276,13 +368,19 @@ const Frame: React.FC<{
                 <div className="flex justify-between">
                   <span className="text-gray-300">资产类型:</span>
                   <span className="font-mono">
-                    {setting.tokenAddress === '0x0000000000000000000000000000000000000000' ? 'ETH' : '代币'}
+                    {setting.tokenAddress === '0x0000000000000000000000000000000000000000' ? 'ETH' : 
+                     setting.tokenAddress === USDT_ADDRESS ? 'USDT' : 
+                     setting.tokenAddress === WBTC_ADDRESS ? 'WBTC' : '代币'}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-300">总注资量:</span>
                   <span className="font-mono">
-                    {ethers.utils.formatEther(setting.depositAmount)} ETH
+                    {setting.tokenAddress === USDT_ADDRESS ? 
+                      ethers.utils.formatUnits(setting.depositAmount, 6) + ' USDT' :
+                     setting.tokenAddress === WBTC_ADDRESS ?
+                      ethers.utils.formatUnits(setting.depositAmount, 8) + ' WBTC' :
+                      ethers.utils.formatEther(setting.depositAmount) + ' ETH'}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -310,7 +408,11 @@ const Frame: React.FC<{
                 <div className="flex justify-between">
                   <span className="text-gray-300">当前余额:</span>
                   <span className="font-mono">
-                    {ethers.utils.formatEther(status.balance)} ETH
+                    {setting.tokenAddress === USDT_ADDRESS ?
+                      ethers.utils.formatUnits(status.balance, 6) + ' USDT' :
+                     setting.tokenAddress === WBTC_ADDRESS ?
+                      ethers.utils.formatUnits(status.balance, 8) + ' WBTC' :
+                      ethers.utils.formatEther(status.balance) + ' ETH'}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -335,18 +437,21 @@ const Frame: React.FC<{
             </div>
           </div>
 
-          {/* 注资功能部分 */}
           {address?.toLowerCase() === setting.settlor.toLowerCase() && (
             <div className="bg-[#1a1f2e] p-4 rounded-lg mt-4">
               <h3 className="text-xl font-semibold mb-3 border-b border-white/20 pb-2">注资操作</h3>
               <div className="space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                  <Label htmlFor="depositAmount" className="text-gray-300">注资金额 (ETH)</Label>
+                  <Label htmlFor="depositAmount" className="text-gray-300">
+                    注资金额 ({setting.tokenAddress === USDT_ADDRESS ? 'USDT' : 
+                              setting.tokenAddress === WBTC_ADDRESS ? 'WBTC' : 'ETH'})
+                  </Label>
                   <Input
                     id="depositAmount"
                     type="number"
                     min="0"
-                    step="0.001"
+                    step={setting.tokenAddress === USDT_ADDRESS ? "0.01" : 
+                          setting.tokenAddress === WBTC_ADDRESS ? "0.0001" : "0.001"}
                     value={depositAmount}
                     onChange={(e) => setDepositAmount(e.target.value)}
                     className="bg-[#0a0f2a] text-white border-none"
@@ -355,7 +460,7 @@ const Frame: React.FC<{
                   <Button 
                     onClick={handleDeposit}
                     disabled={isDepositing}
-                    className="w-full bg-white text-black hover:bg-[#d8dbe0] rounded-[100px]"
+                    className="w-full !bg-white text-black hover:bg-[#d8dbe0] rounded-[100px]"
                   >
                     {isDepositing ? "处理中..." : "确认注资"}
                   </Button>
@@ -369,7 +474,38 @@ const Frame: React.FC<{
                 )}
                 <div className="text-sm text-gray-400 mt-2">
                   <p>注意：只有委托人可以向信托注资</p>
-                  <p>当前余额: {ethers.utils.formatEther(status.balance)} ETH</p>
+                  <p>当前余额: {setting.tokenAddress === USDT_ADDRESS ?
+                    ethers.utils.formatUnits(status.balance, 6) + ' USDT' :
+                    setting.tokenAddress === WBTC_ADDRESS ?
+                    ethers.utils.formatUnits(status.balance, 8) + ' WBTC' :
+                    ethers.utils.formatEther(status.balance) + ' ETH'}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {address?.toLowerCase() === setting.beneficiary.toLowerCase() && (
+            <div className="bg-[#1a1f2e] p-4 rounded-lg mt-4">
+              <h3 className="text-xl font-semibold mb-3 border-b border-white/20 pb-2">提取操作</h3>
+              <div className="space-y-3">
+                <Button 
+                  onClick={handleWithdraw}
+                  disabled={isWithdrawing}
+                  className="w-full !bg-white text-black hover:bg-[#d8dbe0] rounded-[100px]"
+                >
+                  {isWithdrawing ? "处理中..." : "提取资产"}
+                </Button>
+                {withdrawMessage && (
+                  <div className={`text-center mt-2 ${
+                    withdrawMessage.includes('✅') ? 'text-green-400' : 'text-red-400'
+                  }`}>
+                    {withdrawMessage}
+                  </div>
+                )}
+                <div className="text-sm text-gray-400 mt-2">
+                  <p>注意：只有受益人可以提取资产</p>
+                  <p>释放时间: {formatDate(setting.releaseTime)}</p>
+                  <p>剩余提取次数: {Number(setting.withdrawCount) - Number(status.withdrawedCount)}</p>
                 </div>
               </div>
             </div>
@@ -381,8 +517,9 @@ const Frame: React.FC<{
 }
 
 const CreateTrustForm: React.FC<{ contract: ethers.Contract | null, setOutput: (output: string) => void }> = ({ contract, setOutput }) => {
+  const { data: walletClient } = useWalletClient()
   const [formData, setFormData] = useState({
-    tokenAddress: '0x0000000000000000000000000000000000000000', // 默认 ETH
+    tokenAddress: '0x0000000000000000000000000000000000000000',
     tokenType: 'eth',
     depositAmount: '',
     depositCount: '',
@@ -401,12 +538,23 @@ const CreateTrustForm: React.FC<{ contract: ethers.Contract | null, setOutput: (
   }
 
   const handleSubmit = async () => {
-    if (!contract) {
-      setOutput('⚠️ 合约未初始化')
+    if (!contract || !walletClient) {
+      setOutput('⚠️ 合约未初始化或钱包未连接')
       return
     }
     try {
-      const depositAmount = ethers.utils.parseEther(formData.depositAmount || '0')
+      const decimals = formData.tokenType === 'usdt' ? 6 : formData.tokenType === 'wbtc' ? 8 : 18
+      const depositAmount = ethers.utils.parseUnits(formData.depositAmount || '0', decimals)
+      
+      const provider = new ethers.providers.Web3Provider(walletClient.transport, walletClient.chain.id)
+      const signer = provider.getSigner()
+      
+      if (formData.tokenType === 'usdt' || formData.tokenType === 'wbtc') {
+        const tokenContract = new ethers.Contract(formData.tokenAddress, ERC20_ABI, signer)
+        const approveTx = await tokenContract.approve(CONTRACT_ADDRESS, depositAmount)
+        await approveTx.wait()
+      }
+
       const tx = await contract.create(
         formData.tokenAddress,
         depositAmount,
@@ -414,7 +562,8 @@ const CreateTrustForm: React.FC<{ contract: ethers.Contract | null, setOutput: (
         parseInt(formData.withdrawCount) || 0,
         formData.beneficiary,
         parseInt(formData.releaseTime) || 0,
-        formData.isRevocable
+        formData.isRevocable,
+        { value: formData.tokenType === 'eth' ? depositAmount : 0 }
       )
       await tx.wait()
       setOutput('✅ 信托创建成功')
@@ -446,31 +595,30 @@ const CreateTrustForm: React.FC<{ contract: ethers.Contract | null, setOutput: (
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-4 items-center gap-4">
-  <Label htmlFor="tokenType" className="text-right">资产类型</Label>
-  <Select
-    onValueChange={(val: any) => {
-      let tokenAddress = '0x0000000000000000000000000000000000000000' // 默认为 ETH
-      if (val === 'btc') tokenAddress = 'btc-placeholder-address'
-      if (val === 'usdt') tokenAddress = 'usdt-placeholder-address'
-      setFormData({ ...formData, tokenType: val, tokenAddress })
-    }}
-    defaultValue="eth"
-  >
-    <SelectTrigger className="col-span-3 bg-[#1a1f2e] text-white border-none">
-      <SelectValue placeholder="选择资产类型" />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="eth">ETH</SelectItem>
-      <SelectItem value="btc">BTC</SelectItem>
-      <SelectItem value="usdt">USDT</SelectItem>
-    </SelectContent>
-  </Select>
-</div>
+            <Label htmlFor="tokenType" className="text-right">资产类型</Label>
+            <Select
+              onValueChange={(val: any) => {
+                let tokenAddress = '0x0000000000000000000000000000000000000000'
+                if (val === 'usdt') tokenAddress = USDT_ADDRESS
+                if (val === 'wbtc') tokenAddress = WBTC_ADDRESS
+                setFormData({ ...formData, tokenType: val, tokenAddress })
+              }}
+              defaultValue="eth"
+            >
+              <SelectTrigger className="col-span-3 bg-[#1a1f2e] text-white border-none">
+                <SelectValue placeholder="选择资产类型" />
+              </SelectTrigger>
+              <SelectContent className="mt-4">
+                <SelectItem value="eth">ETH</SelectItem>
+                <SelectItem value="usdt">USDT</SelectItem>
+                <SelectItem value="wbtc">WBTC</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid grid-cols-4 items-center gap-4">
-           <Label htmlFor="depositAmount" className="text-right">
-  注资数量 ({formData.tokenType.toUpperCase()})
-</Label>
-
+            <Label htmlFor="depositAmount" className="text-right">
+              注资数量 ({formData.tokenType.toUpperCase()})
+            </Label>
             <Input
               id="depositAmount"
               name="depositAmount"
@@ -479,6 +627,8 @@ const CreateTrustForm: React.FC<{ contract: ethers.Contract | null, setOutput: (
               className="col-span-3 bg-[#1a1f2e] text-white border-none"
               placeholder="输入注资数量"
               type="number"
+              step={formData.tokenType === 'usdt' ? "0.01" : 
+                    formData.tokenType === 'wbtc' ? "0.0001" : "0.001"}
             />
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
@@ -528,17 +678,16 @@ const CreateTrustForm: React.FC<{ contract: ethers.Contract | null, setOutput: (
               type="number"
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4 ">
-            <Label htmlFor="isRevocable" className="text-right ">可撤销</Label>
-           <Switch
-  id="isRevocable"
-  checked={formData.isRevocable}
-  onCheckedChange={handleSwitchChange}
-  className={`col-span-3 transition-all duration-300 ${
-    formData.isRevocable ? 'bg-green-600' : 'bg-gray-600'
-  }`}
-/>
-
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="isRevocable" className="text-right">可撤销</Label>
+            <Switch
+              id="isRevocable"
+              checked={formData.isRevocable}
+              onCheckedChange={handleSwitchChange}
+              className={`col-span-3 transition-all duration-300 ${
+                formData.isRevocable ? 'bg-green-600' : 'bg-gray-600'
+              }`}
+            />
           </div>
         </div>
         <Button
@@ -565,13 +714,10 @@ const TrustInterface: React.FC = () => {
   }[]>([])
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
-  // 刷新信托数据
   const refetchTrusts = () => setRefreshTrigger(prev => prev + 1)
 
-  // 初始化合约
   useEffect(() => {
     const initializeContract = async () => {
-      console.log('useEffect 触发, walletClient:', walletClient, 'isConnected:', isConnected)
       if (!isConnected) {
         setOutput('⚠️ 请先连接钱包')
         return
@@ -586,7 +732,6 @@ const TrustInterface: React.FC = () => {
       }
       if (!walletClient) {
         setOutput('⚠️ 签名人丢失')
-        console.log('walletClient 未加载:', walletClient)
         return
       }
       try {
@@ -595,7 +740,6 @@ const TrustInterface: React.FC = () => {
         const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer)
         setContract(contractInstance)
         setOutput('✅ 合约初始化成功')
-        console.log('合约初始化成功:', contractInstance)
       } catch (error: any) {
         setOutput(`⚠️ 合约初始化失败: ${error.message}`)
         console.error('合约初始化错误:', error)
@@ -604,7 +748,6 @@ const TrustInterface: React.FC = () => {
     initializeContract()
   }, [walletClient, isConnected, isLoading, isError])
 
-  // 自动获取信托数据
   useEffect(() => {
     const fetchTrustData = async () => {
       if (!contract || !address) return
@@ -615,40 +758,53 @@ const TrustInterface: React.FC = () => {
         for (let i = 0; i < trustCount; i++) {
           try {
             const settingRaw = await contract.trustSettingMap(i)
-const statusRaw = await contract.trustStatusMap(i)
+            const statusRaw = await contract.trustStatusMap(i)
 
-const setting: TrustSetting = {
-  settlor: settingRaw.settlor,
-  tokenAddress: settingRaw.tokenAddress,
-  depositAmount: settingRaw.depositAmount.toString(),
-  depositCount: settingRaw.depositCount.toString(),
-  releaseTime: settingRaw.releaseTime.toString(),
-  withdrawCount: settingRaw.withdrawCount.toString(),
-  beneficiary: settingRaw.beneficiary,
-  isRevocable: settingRaw.isRevocable,
-}
+            const setting: TrustSetting = {
+              settlor: settingRaw.settlor,
+              tokenAddress: settingRaw.tokenAddress,
+              depositAmount: settingRaw.depositAmount.toString(),
+              depositCount: settingRaw.depositCount.toString(),
+              releaseTime: settingRaw.releaseTime.toString(),
+              withdrawCount: settingRaw.withdrawCount.toString(),
+              beneficiary: settingRaw.beneficiary,
+              isRevocable: settingRaw.isRevocable,
+            }
 
-const status: TrustStatus = {
-  balance: statusRaw.balance.toString(),
-  depositedCount: statusRaw.depositedCount.toString(),
-  withdrawedCount: statusRaw.withdrawedCount.toString(),
-  nextWithdrawTime: statusRaw.nextWithdrawTime.toString(),
-  isRevoked: statusRaw.isRevoked,
-}
+            const status: TrustStatus = {
+              balance: statusRaw.balance.toString(),
+              depositedCount: statusRaw.depositedCount.toString(),
+              withdrawedCount: statusRaw.withdrawedCount.toString(),
+              nextWithdrawTime: statusRaw.nextWithdrawTime.toString(),
+              isRevoked: statusRaw.isRevoked,
+            }
 
-            
-            // 只保留当前用户相关的信托
             if (
               setting.settlor.toLowerCase() !== address.toLowerCase() &&
               setting.beneficiary.toLowerCase() !== address.toLowerCase()
             ) {
-              continue;
+              continue
+            }
+
+            const tokenSymbolMap: Record<string, string> = {
+              '0x0000000000000000000000000000000000000000': 'ETH',
+              [USDT_ADDRESS]: 'USDT',
+              [WBTC_ADDRESS]: 'WBTC'
+            }
+
+            const formatAmount = (amount: string) => {
+              if (setting.tokenAddress === USDT_ADDRESS) {
+                return ethers.utils.formatUnits(amount, 6) + ' USDT'
+              } else if (setting.tokenAddress === WBTC_ADDRESS) {
+                return ethers.utils.formatUnits(amount, 8) + ' WBTC'
+              }
+              return ethers.utils.formatEther(amount) + ' ETH'
             }
 
             const trustData: TrustData[] = [
               { label: "委托人：", value: formatAddress(setting.settlor) },
-              { label: "资产类别：", value: setting.tokenAddress === '0x0000000000000000000000000000000000000000' ? 'ETH' : '代币' },
-              { label: "注资数量：", value: ethers.utils.formatEther(setting.depositAmount) + ' ETH' }
+              { label: "资产类别：", value: tokenSymbolMap[setting.tokenAddress] || '代币' },
+              { label: "注资数量：", value: formatAmount(setting.depositAmount) }
             ]
             
             trustDataArray.push({ 
@@ -662,7 +818,7 @@ const status: TrustStatus = {
           }
         }
         setTrusts(trustDataArray)
-        setOutput(trustDataArray.length > 0 ? '信托数据加载成功' : 'ℹ️ 无信托数据')
+        setOutput(trustDataArray.length > 0 ? '✅ 信托数据加载成功' : 'ℹ️ 无信托数据')
       } catch (err: any) {
         setOutput(`⚠️ 加载信托数据失败: ${err.message}`)
         console.error('加载信托数据错误:', err)
@@ -678,7 +834,7 @@ const status: TrustStatus = {
 
   return (
     <div className="max-w-4xl mx-auto p-6 bg-black shadow-lg rounded-lg">
-      <h2 className="text-2xl font-bold text-center mb-6 text-white"></h2>
+      <h2 className="text-2xl font-bold text-center mb-6 text-white">我的信托</h2>
       {output && <div className="text-center text-white mb-4">{output}</div>}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {trusts.map((trust) => (
